@@ -3866,8 +3866,7 @@ dependencies = [
 [[package]]
 name = "quic-rpc"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7af964f8ee0a3ff7f03b8bc3ffce8cd604d9c2e5805b45d1446f774c71fb07e"
+source = "git+https://github.com/n0-computer/quic-rpc.git?branch=refactor/service-conn#a56099e8e557776d0dc41f6c45006f879fb88f05"
 dependencies = [
  "bincode",
  "educe",
