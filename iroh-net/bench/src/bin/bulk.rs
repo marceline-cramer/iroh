@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use iroh_net_bench::{
-    configure_tracing_subscriber, iroh, rt, Commands, quinn, s2n,
+    configure_tracing_subscriber, iroh, quinn, rt, s2n, server, Commands, Endpoint, Opt,
 };
 
 fn main() {
@@ -28,7 +28,7 @@ fn main() {
     }
 }
 
-pub fn run_iroh(opt: iroh::Opt) -> Result<()> {
+pub fn run_iroh(opt: Opt) -> Result<()> {
     let server_span = tracing::error_span!("server");
     let runtime = rt();
     let (server_addr, endpoint) = {
@@ -38,7 +38,7 @@ pub fn run_iroh(opt: iroh::Opt) -> Result<()> {
 
     let server_thread = std::thread::spawn(move || {
         let _guard = server_span.entered();
-        if let Err(e) = runtime.block_on(iroh::server(endpoint, opt)) {
+        if let Err(e) = runtime.block_on(server(Endpoint::Iroh(endpoint), opt)) {
             eprintln!("server failed: {e:#}");
         }
     });
@@ -72,7 +72,7 @@ pub fn run_iroh(opt: iroh::Opt) -> Result<()> {
     Ok(())
 }
 
-pub fn run_quinn(opt: quinn::Opt) -> Result<()> {
+pub fn run_quinn(opt: Opt) -> Result<()> {
     let server_span = tracing::error_span!("server");
     let runtime = rt();
     let (server_addr, endpoint) = {
@@ -82,7 +82,7 @@ pub fn run_quinn(opt: quinn::Opt) -> Result<()> {
 
     let server_thread = std::thread::spawn(move || {
         let _guard = server_span.entered();
-        if let Err(e) = runtime.block_on(quinn::server(endpoint, opt)) {
+        if let Err(e) = runtime.block_on(server(Endpoint::Quinn(endpoint), opt)) {
             eprintln!("server failed: {e:#}");
         }
     });
@@ -117,5 +117,5 @@ pub fn run_quinn(opt: quinn::Opt) -> Result<()> {
 }
 
 pub fn run_s2n(_opt: s2n::Opt) -> Result<()> {
-    Ok(())
+    unimplemented!()
 }
