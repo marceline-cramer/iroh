@@ -89,7 +89,6 @@ pub fn run_quinn(opt: Opt) -> Result<()> {
 
     let mut handles = Vec::new();
     for id in 0..opt.clients {
-        let server_addr = server_addr.clone();
         handles.push(std::thread::spawn(move || {
             let _guard = tracing::error_span!("client", id).entered();
             let runtime = rt();
