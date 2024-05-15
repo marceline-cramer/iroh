@@ -52,6 +52,33 @@ use crate::{
 };
 pub use iroh_blobs::util::SetTagOption;
 
+/// Request to create a new scope for temp tags
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BlobTempTagScopeRequest {}
+
+/// Update to a temp tag scope
+#[derive(Debug, Serialize, Deserialize)]
+pub enum BlobTempTagScopeUpdate {
+    /// Drop a temp tag
+    Drop(u64),
+}
+
+/// Response to a temp tag scope request
+#[derive(Debug, Serialize, Deserialize)]
+pub enum BlobTempTagScopeResponse {
+    /// We got the id of the scope
+    Id(u64),
+}
+
+impl Msg<RpcService> for BlobTempTagScopeRequest {
+    type Pattern = BidiStreaming;
+}
+
+impl BidiStreamingMsg<RpcService> for BlobTempTagScopeRequest {
+    type Update = BlobTempTagScopeUpdate;
+    type Response = BlobTempTagScopeResponse;
+}
+
 /// A request to the node to provide the data at the given path
 ///
 /// Will produce a stream of [`AddProgress`] messages.
@@ -1038,6 +1065,8 @@ pub enum Request {
     BlobFsck(BlobConsistencyCheckRequest),
     CreateCollection(CreateCollectionRequest),
     BlobGetCollection(BlobGetCollectionRequest),
+    BlobTempTagScopeRequest(BlobTempTagScopeRequest),
+    BlobTempTagScopeUpdate(BlobTempTagScopeUpdate),
 
     DeleteTag(DeleteTagRequest),
     ListTags(ListTagsRequest),
@@ -1097,6 +1126,7 @@ pub enum Response {
     BlobValidate(ValidateProgress),
     CreateCollection(RpcResult<CreateCollectionResponse>),
     BlobGetCollection(RpcResult<BlobGetCollectionResponse>),
+    BlobTempTagScopeRequest(BlobTempTagScopeResponse),
 
     ListTags(TagInfo),
     DeleteTag(RpcResult<()>),

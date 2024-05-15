@@ -43,13 +43,14 @@ use crate::rpc_protocol::{
     BlobAddStreamUpdate, BlobConsistencyCheckRequest, BlobDeleteBlobRequest, BlobDownloadRequest,
     BlobDownloadResponse, BlobExportRequest, BlobExportResponse, BlobGetCollectionRequest,
     BlobGetCollectionResponse, BlobListCollectionsRequest, BlobListIncompleteRequest,
-    BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobValidateRequest,
-    CreateCollectionRequest, CreateCollectionResponse, DeleteTagRequest, DocExportFileRequest,
-    DocExportFileResponse, DocImportFileRequest, DocImportFileResponse, DocSetHashRequest,
-    ListTagsRequest, NodeAddrRequest, NodeConnectionInfoRequest, NodeConnectionInfoResponse,
-    NodeConnectionsRequest, NodeConnectionsResponse, NodeIdRequest, NodeRelayRequest,
-    NodeShutdownRequest, NodeStatsRequest, NodeStatsResponse, NodeStatusRequest, NodeWatchRequest,
-    NodeWatchResponse, Request, RpcService, SetTagOption,
+    BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobTempTagScopeRequest,
+    BlobTempTagScopeResponse, BlobTempTagScopeUpdate, BlobValidateRequest, CreateCollectionRequest,
+    CreateCollectionResponse, DeleteTagRequest, DocExportFileRequest, DocExportFileResponse,
+    DocImportFileRequest, DocImportFileResponse, DocSetHashRequest, ListTagsRequest,
+    NodeAddrRequest, NodeConnectionInfoRequest, NodeConnectionInfoResponse, NodeConnectionsRequest,
+    NodeConnectionsResponse, NodeIdRequest, NodeRelayRequest, NodeShutdownRequest,
+    NodeStatsRequest, NodeStatsResponse, NodeStatusRequest, NodeWatchRequest, NodeWatchResponse,
+    Request, RpcService, SetTagOption,
 };
 
 use super::{Event, NodeInner};
@@ -131,6 +132,11 @@ impl<D: BaoStore> Handler<D> {
                         .await
                 }
                 BlobAddStreamUpdate(_msg) => Err(RpcServerError::UnexpectedUpdateMessage),
+                BlobTempTagScopeRequest(msg) => {
+                    chan.bidi_streaming(msg, handler, Self::blob_temp_tag_scope)
+                        .await
+                }
+                BlobTempTagScopeUpdate(_msg) => Err(RpcServerError::UnexpectedUpdateMessage),
                 AuthorList(msg) => {
                     chan.server_streaming(msg, handler, |handler, req| {
                         handler.inner.sync.author_list(req)
@@ -833,6 +839,14 @@ impl<D: BaoStore> Handler<D> {
                 (),
             ))
         })
+    }
+
+    fn blob_temp_tag_scope(
+        self,
+        _msg: BlobTempTagScopeRequest,
+        _updates: impl Stream<Item = BlobTempTagScopeUpdate> + Send + Unpin + 'static,
+    ) -> impl Stream<Item = BlobTempTagScopeResponse> {
+        futures_lite::stream::empty()
     }
 
     fn blob_add_stream(
