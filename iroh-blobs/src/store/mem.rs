@@ -75,14 +75,13 @@ impl Store {
 
     fn import_bytes_sync(
         &self,
-        id: u64,
         bytes: Bytes,
         format: BlobFormat,
         progress: impl ProgressSender<Msg = ImportProgress> + IdGenerator,
     ) -> io::Result<TempTag> {
-        progress.blocking_send(ImportProgress::OutboardProgress { id, offset: 0 })?;
+        progress.blocking_send(ImportProgress::OutboardProgress { offset: 0 })?;
         let (storage, hash) = MutableMemStorage::complete(bytes);
-        progress.blocking_send(ImportProgress::OutboardDone { id, hash })?;
+        progress.blocking_send(ImportProgress::OutboardDone { hash })?;
         use super::Store;
         let tag = self.temp_tag(HashAndFormat { hash, format });
         let entry = Entry {
@@ -148,17 +147,12 @@ impl super::Store for Store {
     ) -> io::Result<(TempTag, u64)> {
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
-            let id = progress.new_id();
-            progress.blocking_send(ImportProgress::Found {
-                id,
-                name: path.to_string_lossy().to_string(),
-            })?;
-            progress.try_send(ImportProgress::CopyProgress { id, offset: 0 })?;
+            progress.try_send(ImportProgress::CopyProgress { offset: 0 })?;
             // todo: provide progress for reading into mem
             let bytes: Bytes = std::fs::read(path)?.into();
             let size = bytes.len() as u64;
-            progress.blocking_send(ImportProgress::Size { id, size })?;
-            let tag = this.import_bytes_sync(id, bytes, format, progress)?;
+            progress.blocking_send(ImportProgress::Size { size })?;
+            let tag = this.import_bytes_sync(bytes, format, progress)?;
             Ok((tag, size))
         })
         .await?
@@ -171,30 +165,27 @@ impl super::Store for Store {
         progress: impl ProgressSender<Msg = ImportProgress> + IdGenerator,
     ) -> io::Result<(TempTag, u64)> {
         let this = self.clone();
-        let id = progress.new_id();
         let name = temp_name();
-        progress.send(ImportProgress::Found { id, name }).await?;
         let mut bytes = BytesMut::new();
         while let Some(chunk) = data.next().await {
             bytes.extend_from_slice(&chunk?);
             progress
                 .try_send(ImportProgress::CopyProgress {
-                    id,
                     offset: bytes.len() as u64,
                 })
                 .ok();
         }
         let bytes = bytes.freeze();
         let size = bytes.len() as u64;
-        progress.blocking_send(ImportProgress::Size { id, size })?;
-        let tag = this.import_bytes_sync(id, bytes, format, progress)?;
+        progress.blocking_send(ImportProgress::Size { size })?;
+        let tag = this.import_bytes_sync(bytes, format, progress)?;
         Ok((tag, size))
     }
 
     async fn import_bytes(&self, bytes: Bytes, format: BlobFormat) -> io::Result<TempTag> {
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
-            this.import_bytes_sync(0, bytes, format, IgnoreProgressSender::default())
+            this.import_bytes_sync(bytes, format, IgnoreProgressSender::default())
         })
         .await?
     }

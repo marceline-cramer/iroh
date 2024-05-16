@@ -668,30 +668,26 @@ pub enum GcSweepEvent {
 #[allow(missing_docs)]
 #[derive(Debug)]
 pub enum ImportProgress {
-    /// Found a path
-    ///
-    /// This will be the first message for an id
-    Found { id: u64, name: String },
     /// Progress when copying the file to the store
     ///
     /// This will be omitted if the store can use the file in place
     ///
     /// There will be multiple of these messages for an id
-    CopyProgress { id: u64, offset: u64 },
+    CopyProgress { offset: u64 },
     /// Determined the size
     ///
-    /// This will come after `Found` and zero or more `CopyProgress` messages.
+    /// This will come after zero or more `CopyProgress` messages.
     /// For unstable files, determining the size will only be done once the file
     /// is fully copied.
-    Size { id: u64, size: u64 },
+    Size { size: u64 },
     /// Progress when computing the outboard
     ///
     /// There will be multiple of these messages for an id
-    OutboardProgress { id: u64, offset: u64 },
+    OutboardProgress { offset: u64 },
     /// Done computing the outboard
     ///
     /// This comes after `Size` and zero or more `OutboardProgress` messages
-    OutboardDone { id: u64, hash: Hash },
+    OutboardDone { hash: Hash },
 }
 
 /// The import mode describes how files will be imported.

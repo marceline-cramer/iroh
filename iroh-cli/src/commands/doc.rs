@@ -808,15 +808,15 @@ where
                 Ok(item) => item,
             };
             match item {
-                AddProgress::Found { name, id, size } => {
-                    tracing::info!("Found({id},{name},{size})");
+                AddProgress::Found { name, size } => {
+                    tracing::info!("Found({name},{size})");
                     imp.add_found(name.clone(), size);
-                    collections.borrow_mut().insert(id, (name, size, None, 0));
+                    collections.borrow_mut().insert(0, (name, size, None, 0));
                     None
                 }
-                AddProgress::Progress { id, offset } => {
-                    tracing::info!("Progress({id}, {offset})");
-                    if let Some((_, size, _, last_val)) = collections.borrow_mut().get_mut(&id) {
+                AddProgress::Progress { offset } => {
+                    tracing::info!("Progress({offset})");
+                    if let Some((_, size, _, last_val)) = collections.borrow_mut().get_mut(&0) {
                         assert!(*last_val <= offset, "wtf");
                         assert!(offset <= *size, "wtf2");
                         imp.add_progress(offset - *last_val);
@@ -824,9 +824,9 @@ where
                     }
                     None
                 }
-                AddProgress::Done { hash, id } => {
-                    tracing::info!("Done({id},{hash:?})");
-                    match collections.borrow_mut().get_mut(&id) {
+                AddProgress::Done { hash } => {
+                    tracing::info!("Done({hash:?})");
+                    match collections.borrow_mut().get_mut(&0) {
                         Some((path_str, size, ref mut h, last_val)) => {
                             imp.add_progress(*size - *last_val);
                             imp.import_found(path_str.clone());
@@ -836,10 +836,7 @@ where
                                 match path_to_key(path, Some(prefix.clone()), Some(root.clone())) {
                                     Ok(k) => k.to_vec(),
                                     Err(e) => {
-                                        tracing::info!(
-                                            "error getting key from {}, id {id}",
-                                            path_str
-                                        );
+                                        tracing::info!("error getting key from {}", path_str);
                                         return Some(Err(anyhow::anyhow!(
                                             "Issue creating a key for entry {hash:?}: {e}"
                                         )));
@@ -847,14 +844,14 @@ where
                                 };
                             // send update to doc
                             tracing::info!(
-                                "setting entry {} (id: {id}) to doc",
+                                "setting entry {} to doc",
                                 String::from_utf8(key.clone()).unwrap()
                             );
                             Some(Ok((key, hash, *size)))
                         }
                         None => {
                             tracing::info!(
-                                "error: got `AddProgress::Done` for unknown collection id {id}"
+                                "error: got `AddProgress::Done` for unknown collection id"
                             );
                             Some(Err(anyhow::anyhow!(
                                 "Received progress information on an unknown file."
