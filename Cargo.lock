@@ -2758,6 +2758,7 @@ dependencies = [
  "anyhow",
  "axum",
  "backoff",
+ "base64 0.22.1",
  "bytes",
  "clap",
  "criterion",
