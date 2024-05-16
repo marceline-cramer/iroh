@@ -5,21 +5,17 @@ use std::{
     io,
     path::PathBuf,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use bytes::Bytes;
 use futures_lite::{Stream, StreamExt};
-use futures_util::SinkExt;
+use futures_util::{FutureExt, SinkExt};
 use iroh_base::{node_addr::AddrInfoOptions, ticket::BlobTicket};
 use iroh_blobs::{
-    export::ExportProgress as BytesExportProgress,
-    format::collection::Collection,
-    get::db::DownloadProgress as BytesDownloadProgress,
-    store::{ConsistencyCheckProgress, ExportFormat, ExportMode, ValidateProgress},
-    BlobFormat, Hash, Tag,
+    export::ExportProgress as BytesExportProgress, format::collection::Collection, get::db::DownloadProgress as BytesDownloadProgress, store::{ConsistencyCheckProgress, ExportFormat, ExportMode, ValidateProgress}, BlobFormat, Hash, HashAndFormat, Tag
 };
 use iroh_net::NodeAddr;
 use portable_atomic::{AtomicU64, Ordering};
@@ -30,11 +26,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use tracing::warn;
 
 use crate::rpc_protocol::{
-    BlobAddPathRequest, BlobAddStreamRequest, BlobAddStreamUpdate, BlobConsistencyCheckRequest,
-    BlobDeleteBlobRequest, BlobDownloadRequest, BlobExportRequest, BlobGetCollectionRequest,
-    BlobGetCollectionResponse, BlobListCollectionsRequest, BlobListIncompleteRequest,
-    BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobValidateRequest,
-    CreateCollectionRequest, CreateCollectionResponse, NodeStatusRequest, RpcService, SetTagOption,
+    BatchAddStreamRequest, BatchAddStreamUpdate, BlobAddPathRequest, BlobAddStreamRequest, BlobAddStreamUpdate, BlobConsistencyCheckRequest, BlobDeleteBlobRequest, BlobDownloadRequest, BlobExportRequest, BlobGetCollectionRequest, BlobGetCollectionResponse, BlobListCollectionsRequest, BlobListIncompleteRequest, BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobTempTagScopeRequest, BlobTempTagScopeResponse, BlobTempTagScopeUpdate, BlobValidateRequest, CreateCollectionRequest, CreateCollectionResponse, NodeStatusRequest, RpcService, SetTagOption
 };
 
 use super::{flatten, Iroh};
@@ -51,10 +43,90 @@ impl<'a, C: ServiceConnection<RpcService>> From<&'a Iroh<C>> for &'a RpcClient<R
     }
 }
 
+/// A scope in which blobs can be added.
+#[derive(derive_more::Debug)]
+pub struct Batch<C: ServiceConnection<RpcService>> {
+    id: u64,
+    #[debug(skip)]
+    drop: Arc<dyn Fn(u64) + Send + Sync + 'static>,
+    rpc: RpcClient<RpcService, C>,
+}
+
+impl<C: ServiceConnection<RpcService>> Batch<C> {
+    
+    /// Write a blob by passing a stream of bytes.
+    pub async fn add_stream(
+        &self,
+        mut input: impl Stream<Item = io::Result<Bytes>> + Send + Unpin + 'static,
+        format: BlobFormat,
+    ) -> Result<TempTag> {
+        let (mut sink, mut stream) = self.rpc.bidi(BatchAddStreamRequest { 
+            scope: self.id,
+            format,
+        }).await?;
+        while let Some(item) = input.next().await {
+            match item {
+                Ok(chunk) => {
+                    sink.send(BatchAddStreamUpdate::Chunk(chunk)).await.map_err(|err| anyhow!("Failed to send input stream to remote: {err:?}"))?;
+                }
+                Err(err) => {
+                    warn!("Abort send, reason: failed to read from source stream: {err:?}");
+                    sink.send(BatchAddStreamUpdate::Abort).await.map_err(|err| anyhow!("Failed to send input stream to remote: {err:?}"))?;
+                    break;
+                }
+            }
+        }
+        sink.close().await.map_err(|err| anyhow!("Failed to close the stream: {err:?}"))?;
+        let mut res = None;
+        while let Some(item) = stream.next().await {
+            res = Some(item?);
+        };
+        let res = res.context("Missing answer")?;
+        Ok(TempTag {
+            drop: self.drop.clone(),
+            id: res.tag,
+            hash_and_format: HashAndFormat {
+                hash: res.hash,
+                format,
+            }
+        })
+    }
+}
+
+///
+#[derive(derive_more::Debug)]
+pub struct TempTag {
+    /// The id of the temporary tag.
+    id: u64,
+    /// The hash and format of the blob.
+    hash_and_format: HashAndFormat,
+    /// The drop function to call when the tag is dropped.
+    #[debug(skip)]
+    drop: Arc<dyn Fn(u64) + Send + Sync + 'static>
+}
+
+impl Drop for TempTag {
+    fn drop(&mut self) {
+        (self.drop)(self.id);
+    }
+}
+
 impl<C> Client<C>
 where
     C: ServiceConnection<RpcService>,
 {
+    /// Create a new scope in which blobs can be added.
+    pub async fn batch(&self) -> Result<Batch<C>> {
+        let (updates, mut stream) = self.rpc.bidi(BlobTempTagScopeRequest).await?;
+        let updates = Mutex::new(updates);
+        let drop = Arc::new(move |id| {
+            updates.lock().unwrap().send(BlobTempTagScopeUpdate::Drop(id)).now_or_never();
+        });
+        let BlobTempTagScopeResponse::Id(id) = stream.next().await.context("expected scope id")??;
+        let rpc = self.rpc.clone();
+        Ok(Batch { id, drop, rpc })
+    }
+
     /// Stream the contents of a a single blob.
     ///
     /// Returns a [`Reader`], which can report the size of the blob before reading it.

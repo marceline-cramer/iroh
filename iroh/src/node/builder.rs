@@ -452,6 +452,7 @@ where
             rt: lp.clone(),
             sync,
             downloader,
+            temp_tags: Default::default(),
         });
         let task = {
             let gossip = gossip.clone();

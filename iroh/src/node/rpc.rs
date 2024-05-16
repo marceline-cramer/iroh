@@ -39,18 +39,7 @@ use crate::client::blobs::{
 use crate::client::tags::TagInfo;
 use crate::client::NodeStatus;
 use crate::rpc_protocol::{
-    BlobAddPathRequest, BlobAddPathResponse, BlobAddStreamRequest, BlobAddStreamResponse,
-    BlobAddStreamUpdate, BlobConsistencyCheckRequest, BlobDeleteBlobRequest, BlobDownloadRequest,
-    BlobDownloadResponse, BlobExportRequest, BlobExportResponse, BlobGetCollectionRequest,
-    BlobGetCollectionResponse, BlobListCollectionsRequest, BlobListIncompleteRequest,
-    BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobTempTagScopeRequest,
-    BlobTempTagScopeResponse, BlobTempTagScopeUpdate, BlobValidateRequest, CreateCollectionRequest,
-    CreateCollectionResponse, DeleteTagRequest, DocExportFileRequest, DocExportFileResponse,
-    DocImportFileRequest, DocImportFileResponse, DocSetHashRequest, ListTagsRequest,
-    NodeAddrRequest, NodeConnectionInfoRequest, NodeConnectionInfoResponse, NodeConnectionsRequest,
-    NodeConnectionsResponse, NodeIdRequest, NodeRelayRequest, NodeShutdownRequest,
-    NodeStatsRequest, NodeStatsResponse, NodeStatusRequest, NodeWatchRequest, NodeWatchResponse,
-    Request, RpcService, SetTagOption,
+    BatchAddStreamRequest, BatchAddStreamResponse, BatchAddStreamUpdate, BlobAddPathRequest, BlobAddPathResponse, BlobAddStreamRequest, BlobAddStreamResponse, BlobAddStreamUpdate, BlobConsistencyCheckRequest, BlobDeleteBlobRequest, BlobDownloadRequest, BlobDownloadResponse, BlobExportRequest, BlobExportResponse, BlobGetCollectionRequest, BlobGetCollectionResponse, BlobListCollectionsRequest, BlobListIncompleteRequest, BlobListRequest, BlobReadAtRequest, BlobReadAtResponse, BlobTempTagScopeRequest, BlobTempTagScopeResponse, BlobTempTagScopeUpdate, BlobValidateRequest, CreateCollectionRequest, CreateCollectionResponse, DeleteTagRequest, DocExportFileRequest, DocExportFileResponse, DocImportFileRequest, DocImportFileResponse, DocSetHashRequest, ListTagsRequest, NodeAddrRequest, NodeConnectionInfoRequest, NodeConnectionInfoResponse, NodeConnectionsRequest, NodeConnectionsResponse, NodeIdRequest, NodeRelayRequest, NodeShutdownRequest, NodeStatsRequest, NodeStatsResponse, NodeStatusRequest, NodeWatchRequest, NodeWatchResponse, Request, RpcService, SetTagOption
 };
 
 use super::{Event, NodeInner};
@@ -290,6 +279,10 @@ impl<D: BaoStore> Handler<D> {
                     })
                     .await
                 }
+                BatchAddStreamRequest(msg) => {
+                    chan.bidi_streaming(msg, handler, Self::batch_add_stream).await
+                }
+                BatchAddStreamUpdate(_msg) => Err(RpcServerError::UnexpectedUpdateMessage),
             }
         });
     }
@@ -843,10 +836,39 @@ impl<D: BaoStore> Handler<D> {
 
     fn blob_temp_tag_scope(
         self,
-        _msg: BlobTempTagScopeRequest,
-        _updates: impl Stream<Item = BlobTempTagScopeUpdate> + Send + Unpin + 'static,
+        _: BlobTempTagScopeRequest,
+        mut updates: impl Stream<Item = BlobTempTagScopeUpdate> + Send + Unpin + 'static,
     ) -> impl Stream<Item = BlobTempTagScopeResponse> {
+        let scope_id = self.inner.temp_tags.lock().unwrap().create();
+        tokio::spawn(async move {
+            while let Some(item) = updates.next().await {
+                match item {
+                    BlobTempTagScopeUpdate::Drop(tag_id) => {
+                        self.inner.temp_tags.lock().unwrap().remove_one(scope_id, tag_id);
+                    },
+                }
+            }
+            self.inner.temp_tags.lock().unwrap().remove(scope_id);
+        });
+        futures_lite::stream::once(BlobTempTagScopeResponse::Id(scope_id))
+    }
+
+    fn batch_add_stream(
+        self,
+        msg: BatchAddStreamRequest,
+        stream: impl Stream<Item = BatchAddStreamUpdate> + Send + Unpin + 'static,
+    ) -> impl Stream<Item = BatchAddStreamResponse> {
         futures_lite::stream::empty()
+        let (tx, rx) = flume::bounded(32);
+        let this = self.clone();
+
+        self.rt().spawn_pinned(|| async move {
+            if let Err(err) = this.blob_add_stream0(msg, stream, tx.clone()).await {
+                tx.send_async(AddProgress::Abort(err.into())).await.ok();
+            }
+        });
+
+        // rx.into_stream().map(BlobAddStreamResponse)
     }
 
     fn blob_add_stream(

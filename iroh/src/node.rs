@@ -5,16 +5,18 @@
 //! You can monitor what is happening in the node using [`Node::subscribe`].
 //!
 //! To shut down the node, call [`Node::shutdown`].
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use futures_lite::{future::Boxed as BoxFuture, FutureExt, StreamExt};
 use iroh_base::key::PublicKey;
 use iroh_blobs::downloader::Downloader;
 use iroh_blobs::store::Store as BaoStore;
+use iroh_blobs::TempTag;
 use iroh_net::util::AbortingJoinHandle;
 use iroh_net::{endpoint::LocalEndpointsStream, key::SecretKey, Endpoint};
 use quic_rpc::transport::flume::FlumeConnection;
@@ -100,6 +102,46 @@ struct NodeInner<D> {
     rt: LocalPoolHandle,
     pub(crate) sync: Engine,
     downloader: Downloader,
+    temp_tags: Mutex<TempTagScopes>,
+}
+
+#[derive(Debug, Default)]
+struct TempTagScopes {
+    scopes: BTreeMap<u64, TempTagScope>,
+    max: u64,
+}
+
+#[derive(Debug, Default)]
+struct TempTagScope {
+    tags: BTreeMap<u64, TempTag>,
+    max: u64,
+}
+
+impl TempTagScopes {
+
+    fn create(&mut self) -> u64 {
+        let id = self.max;
+        self.max += 1;
+        id
+    }
+
+    fn create_one(&mut self, scope: u64, tt: TempTag) -> u64 {
+        let entry = self.scopes.entry(scope).or_default();
+        let id = entry.max;
+        entry.max += 1;
+        entry.tags.insert(id, tt);
+        id
+    }
+
+    fn remove_one(&mut self, scope: u64, tag: u64) {
+        if let Some(scope) = self.scopes.get_mut(&scope) {
+            scope.tags.remove(&tag);
+        }
+    }
+
+    fn remove(&mut self, scope: u64) {
+        self.scopes.remove(&scope);
+    }
 }
 
 /// Events emitted by the [`Node`] informing about the current status.

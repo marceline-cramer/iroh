@@ -54,7 +54,7 @@ pub use iroh_blobs::util::SetTagOption;
 
 /// Request to create a new scope for temp tags
 #[derive(Debug, Serialize, Deserialize)]
-pub struct BlobTempTagScopeRequest {}
+pub struct BlobTempTagScopeRequest;
 
 /// Update to a temp tag scope
 #[derive(Debug, Serialize, Deserialize)]
@@ -1009,6 +1009,41 @@ impl BidiStreamingMsg<RpcService> for BlobAddStreamRequest {
 #[derive(Debug, Serialize, Deserialize, derive_more::Into)]
 pub struct BlobAddStreamResponse(pub AddProgress);
 
+
+/// Write a blob from a byte stream
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BatchAddStreamRequest {
+    /// What format to use for the blob
+    pub format: BlobFormat,
+    /// Scope to create the temp tag in
+    pub scope: u64,
+}
+
+/// Write a blob from a byte stream
+#[derive(Serialize, Deserialize, Debug)]
+pub enum BatchAddStreamUpdate {
+    /// A chunk of stream data
+    Chunk(Bytes),
+    /// Abort the request due to an error on the client side
+    Abort,
+}
+
+impl Msg<RpcService> for BatchAddStreamRequest {
+    type Pattern = BidiStreaming;
+}
+
+impl BidiStreamingMsg<RpcService> for BatchAddStreamRequest {
+    type Update = BatchAddStreamUpdate;
+    type Response = BatchAddStreamResponse;
+}
+
+/// Wrapper around [`AddProgress`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchAddStreamResponse {
+    pub hash: Hash,
+    pub tag: u64,
+}
+
 /// Get stats for the running Iroh node
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeStatsRequest {}
@@ -1068,6 +1103,9 @@ pub enum Request {
     BlobTempTagScopeRequest(BlobTempTagScopeRequest),
     BlobTempTagScopeUpdate(BlobTempTagScopeUpdate),
 
+    BatchAddStreamRequest(BatchAddStreamRequest),
+    BatchAddStreamUpdate(BatchAddStreamUpdate),
+
     DeleteTag(DeleteTagRequest),
     ListTags(ListTagsRequest),
 
@@ -1101,7 +1139,7 @@ pub enum Request {
 }
 
 /// The response enum, listing all possible responses.
-#[allow(missing_docs, clippy::large_enum_variant)]
+#[allow(missing_docs)]
 #[derive(Debug, Serialize, Deserialize, From, TryInto)]
 pub enum Response {
     NodeStatus(RpcResult<NodeStatus>),
@@ -1124,6 +1162,9 @@ pub enum Response {
     BlobFsck(ConsistencyCheckProgress),
     BlobExport(BlobExportResponse),
     BlobValidate(ValidateProgress),
+
+    BatchAddStream(BatchAddStreamResponse),
+
     CreateCollection(RpcResult<CreateCollectionResponse>),
     BlobGetCollection(RpcResult<BlobGetCollectionResponse>),
     BlobTempTagScopeRequest(BlobTempTagScopeResponse),
